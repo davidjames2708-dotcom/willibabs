@@ -1155,7 +1155,7 @@ textarea:focus-visible {
   justify-content: flex-end;
   padding: 24px;
   position: fixed;
-  z-index: 10;
+  z-index: 120;
 }
 
 .compose-window {
