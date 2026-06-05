@@ -1,20 +1,15 @@
 import crypto from "crypto";
-import { promises as fs } from "fs";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import path from "path";
 
 const SESSION_COOKIE = "priscilla_mail_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
-const SESSION_VERSION = 4;
-const sessionsPath = path.join(process.cwd(), ".dist", "sessions.json");
+const SESSION_VERSION = 5;
 
 type SessionRecord = {
-  id: string;
   email: string;
   password?: string;
   expiresAt: number;
-  createdAt: string;
 };
 
 function sessionSecret() {
@@ -74,68 +69,52 @@ function timingSafeEqual(left: string, right: string) {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-async function readSessionRecords() {
+function encodeSession(record: SessionRecord) {
+  return Buffer.from(JSON.stringify(record), "utf8").toString("base64url");
+}
+
+function createSessionToken(record: SessionRecord) {
+  const payload = encodeSession(record);
+  return `${SESSION_VERSION}.${payload}.${sign(`${SESSION_VERSION}.${payload}`)}`;
+}
+
+function readSessionToken(token?: string) {
+  const [version, payload, signature] = token?.split(".") ?? [];
+
+  if (version !== String(SESSION_VERSION) || !payload || !signature) {
+    return null;
+  }
+
+  if (!timingSafeEqual(sign(`${version}.${payload}`), signature)) {
+    return null;
+  }
+
   try {
-    const records = JSON.parse(await fs.readFile(sessionsPath, "utf8")) as SessionRecord[];
-    const now = Date.now();
-    return records.filter((record) => record.expiresAt > now);
+    const record = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as SessionRecord;
+
+    if (!record.email || record.expiresAt <= Date.now()) {
+      return null;
+    }
+
+    return record;
   } catch {
-    return [];
-  }
-}
-
-async function writeSessionRecords(records: SessionRecord[]) {
-  await fs.mkdir(path.dirname(sessionsPath), { recursive: true });
-  await fs.writeFile(sessionsPath, JSON.stringify(records, null, 2));
-}
-
-function createSessionToken(sessionId: string) {
-  return `${SESSION_VERSION}.${sessionId}.${sign(`${SESSION_VERSION}.${sessionId}`)}`;
-}
-
-function readSessionId(token?: string) {
-  const [version, sessionId, signature] = token?.split(".") ?? [];
-
-  if (version !== String(SESSION_VERSION) || !sessionId || !signature) {
     return null;
   }
-
-  if (!timingSafeEqual(sign(`${version}.${sessionId}`), signature)) {
-    return null;
-  }
-
-  return sessionId;
 }
 
 export async function createSession(email: string, password: string) {
-  const records = await readSessionRecords();
-  const id = crypto.randomBytes(32).toString("base64url");
   const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
 
-  await writeSessionRecords([
-    {
-      id,
-      email,
-      password: encryptSecret(password),
-      expiresAt,
-      createdAt: new Date().toISOString()
-    },
-    ...records.filter((record) => record.email !== email)
-  ]);
-
-  return createSessionToken(id);
+  return createSessionToken({
+    email,
+    password: encryptSecret(password),
+    expiresAt
+  });
 }
 
 export async function getSession() {
   const cookieStore = await cookies();
-  const sessionId = readSessionId(cookieStore.get(SESSION_COOKIE)?.value);
-
-  if (!sessionId) {
-    return null;
-  }
-
-  const records = await readSessionRecords();
-  const record = records.find((item) => item.id === sessionId);
+  const record = readSessionToken(cookieStore.get(SESSION_COOKIE)?.value);
 
   if (!record) {
     return null;
@@ -170,14 +149,6 @@ export async function setSessionCookie(response: NextResponse, email: string, pa
 }
 
 export async function clearSessionCookie(response: NextResponse) {
-  const cookieStore = await cookies();
-  const sessionId = readSessionId(cookieStore.get(SESSION_COOKIE)?.value);
-
-  if (sessionId) {
-    const records = await readSessionRecords();
-    await writeSessionRecords(records.filter((record) => record.id !== sessionId));
-  }
-
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
