@@ -1468,9 +1468,10 @@ textarea:focus-visible {
 }
 
 .roundcube-compose .rich-editor {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  height: 220px;
   margin: 0 12px 8px;
-  min-height: 180px;
+  min-height: 220px;
   width: calc(100% - 24px);
 }
 
@@ -3130,36 +3131,6 @@ textarea:focus-visible {
     overflow-wrap: anywhere;
   }
 
-  .compose-backdrop {
-    align-items: stretch;
-    justify-content: stretch;
-    padding: 0;
-  }
-
-  .compose-window,
-  .roundcube-compose {
-    border-radius: 0;
-    height: 100dvh;
-    max-height: 100dvh;
-    width: 100%;
-  }
-
-  .compose-footer {
-    display: grid;
-    gap: 8px;
-    grid-template-columns: 1fr 1fr;
-    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
-  }
-
-  .compose-footer .send-button {
-    font-size: 17px;
-    grid-column: 1 / -1;
-    margin-left: 0;
-    min-height: 52px;
-    min-width: 0;
-    width: 100%;
-  }
-
   .sender-card {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -3360,7 +3331,7 @@ textarea:focus-visible {
   }
 
   .compose-backdrop {
-    align-items: stretch;
+    align-items: flex-end;
     justify-content: stretch;
     padding: 0;
   }
@@ -3368,13 +3339,16 @@ textarea:focus-visible {
   .compose-window,
   .roundcube-compose {
     border-radius: 0;
-    height: 100dvh;
+    height: auto;
     max-height: 100dvh;
     width: 100%;
   }
 
-  .rich-editor {
-    min-height: 140px;
+  .rich-editor,
+  .roundcube-compose .rich-editor {
+    flex: 0 0 auto;
+    height: 220px;
+    min-height: 220px;
   }
 
   .compose-row {
@@ -3441,7 +3415,7 @@ textarea:focus-visible {
   }
 
   .compose-backdrop {
-    align-items: stretch;
+    align-items: flex-end;
     justify-content: stretch;
     padding: 0;
   }
@@ -3449,13 +3423,16 @@ textarea:focus-visible {
   .compose-window,
   .roundcube-compose {
     border-radius: 0;
-    height: 100dvh;
+    height: auto;
     max-height: 100dvh;
     width: 100%;
   }
 
-  .rich-editor {
-    min-height: 140px;
+  .rich-editor,
+  .roundcube-compose .rich-editor {
+    flex: 0 0 auto;
+    height: 220px;
+    min-height: 220px;
   }
 
   .compose-footer {
