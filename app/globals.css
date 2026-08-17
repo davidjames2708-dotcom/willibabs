@@ -1358,6 +1358,8 @@ textarea:focus-visible {
   overflow: auto;
   padding: 14px;
   resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
   white-space: pre-wrap;
 }
 

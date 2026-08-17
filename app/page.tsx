@@ -54,7 +54,7 @@ import {
   Paintbrush,
   X
 } from "lucide-react";
-import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, PointerEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Folder = "Inbox" | "Starred" | "Drafts" | "Sent" | "Archive" | "Junk" | "Trash";
 type AppName = "Mail" | "Contacts" | "Calendar" | "Files" | "Settings";
@@ -82,6 +82,45 @@ const COMPOSE_FONT_SIZES = ["10pt", "12pt", "14pt", "16pt", "18pt", "20pt", "24p
 
 function cssFontFamily(font: string) {
   return font.includes(" ") ? `"${font}", Times, serif` : font;
+}
+
+function wrapRangeWithStyles(range: Range, styles: Record<string, string>) {
+  const span = document.createElement("span");
+
+  Object.entries(styles).forEach(([property, value]) => {
+    span.style.setProperty(property, value);
+  });
+
+  const contents = range.extractContents();
+  span.appendChild(contents.childNodes.length ? contents : document.createTextNode("\u200b"));
+  stampStyles(span, styles);
+  range.insertNode(span);
+
+  const wrapped = document.createRange();
+  wrapped.selectNodeContents(span);
+  return wrapped;
+}
+
+function stampStyles(root: HTMLElement, styles: Record<string, string>) {
+  Object.entries(styles).forEach(([property, value]) => {
+    root.style.setProperty(property, value);
+
+    if (property === "font-size") {
+      root.removeAttribute("size");
+    }
+  });
+
+  root.querySelectorAll("span, font, p, div").forEach((node) => {
+    const element = node as HTMLElement;
+
+    Object.entries(styles).forEach(([property, value]) => {
+      element.style.setProperty(property, value);
+
+      if (property === "font-size") {
+        element.removeAttribute("size");
+      }
+    });
+  });
 }
 
 type FolderItem = {
@@ -849,6 +888,7 @@ export default function Home() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const contactImportRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const editorSelectionRef = useRef<Range | null>(null);
   const loginSubmitIntentRef = useRef(false);
   const refreshInFlightRef = useRef(false);
 
@@ -2222,8 +2262,56 @@ export default function Home() {
     showNotice("Cc and Bcc fields opened");
   }
 
-  function keepEditorFocus(event: MouseEvent<HTMLElement>) {
+  function keepEditorFocus(event: PointerEvent<HTMLElement>) {
     event.preventDefault();
+  }
+
+  function saveEditorSelection() {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection || selection.rangeCount === 0) {
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+
+    if (editor.contains(range.commonAncestorContainer)) {
+      editorSelectionRef.current = range.cloneRange();
+    }
+  }
+
+  function restoreEditorSelection() {
+    const editor = editorRef.current;
+
+    if (!editor) {
+      return false;
+    }
+
+    editor.focus();
+    const selection = window.getSelection();
+
+    if (!selection) {
+      return false;
+    }
+
+    selection.removeAllRanges();
+
+    if (editorSelectionRef.current) {
+      try {
+        selection.addRange(editorSelectionRef.current);
+        return true;
+      } catch {
+        editorSelectionRef.current = null;
+      }
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.addRange(range);
+    editorSelectionRef.current = range.cloneRange();
+    return true;
   }
 
   function syncEditorBody() {
@@ -2231,6 +2319,8 @@ export default function Home() {
   }
 
   function syncFormatState() {
+    saveEditorSelection();
+
     try {
       setBodyBold(document.queryCommandState("bold"));
       setBodyItalic(document.queryCommandState("italic"));
@@ -2240,6 +2330,18 @@ export default function Home() {
     }
   }
 
+  function currentEditorRange() {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection || selection.rangeCount === 0) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    return editor.contains(range.commonAncestorContainer) ? range : null;
+  }
+
   function runEditorCommand(command: string, value?: string) {
     const editor = editorRef.current;
 
@@ -2247,7 +2349,7 @@ export default function Home() {
       return;
     }
 
-    editor.focus();
+    restoreEditorSelection();
     document.execCommand("styleWithCSS", false, "true");
     document.execCommand(command, false, value);
 
@@ -2255,49 +2357,60 @@ export default function Home() {
       document.execCommand("backColor", false, value);
     }
 
+    saveEditorSelection();
     syncEditorBody();
     syncFormatState();
   }
 
-  function applySelectionOrEditorStyle(property: "fontFamily" | "fontSize", value: string) {
+  function applyInlineStyles(styles: Record<string, string>, applyToEditor = false) {
     const editor = editorRef.current;
 
     if (!editor) {
       return;
     }
 
-    editor.focus();
-    const selection = window.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const hasSelection = Boolean(
-      range && !range.collapsed && editor.contains(range.commonAncestorContainer)
-    );
+    restoreEditorSelection();
+    const range = currentEditorRange();
+    const hasSelection = Boolean(range && !range.collapsed);
 
-    if (hasSelection) {
-      document.execCommand("styleWithCSS", false, "false");
-      document.execCommand("fontSize", false, "7");
-      editor.querySelectorAll('font[size="7"]').forEach((node) => {
-        const span = document.createElement("span");
-        span.style[property] = value;
-        while (node.firstChild) {
-          span.appendChild(node.firstChild);
-        }
-        node.parentNode?.replaceChild(span, node);
+    if (hasSelection && range) {
+      const wrapped = wrapRangeWithStyles(range, styles);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(wrapped);
+      editorSelectionRef.current = wrapped.cloneRange();
+    } else if (editor.innerText.trim()) {
+      stampStyles(editor, styles);
+      restoreEditorSelection();
+    } else if (range) {
+      const wrapped = wrapRangeWithStyles(range, styles);
+      const caret = document.createRange();
+      caret.selectNodeContents(wrapped.startContainer);
+      caret.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(caret);
+      editorSelectionRef.current = caret.cloneRange();
+    }
+
+    if (applyToEditor) {
+      Object.entries(styles).forEach(([property, value]) => {
+        editor.style.setProperty(property, value);
       });
     }
 
-    editor.style[property] = value;
+    saveEditorSelection();
     syncEditorBody();
   }
 
   function setEditorFont(font: string) {
     setBodyFont(font);
-    applySelectionOrEditorStyle("fontFamily", cssFontFamily(font));
+    applyInlineStyles({ "font-family": cssFontFamily(font) }, true);
   }
 
   function setEditorSize(size: string) {
     setBodySize(size);
-    applySelectionOrEditorStyle("fontSize", size);
+    applyInlineStyles({ "font-size": size }, true);
   }
 
   function handleToolbarImageClick() {
@@ -2307,6 +2420,7 @@ export default function Home() {
       return;
     }
 
+    saveEditorSelection();
     imageInputRef.current?.click();
   }
 
@@ -2333,12 +2447,13 @@ export default function Home() {
         return;
       }
 
-      editor.focus();
+      restoreEditorSelection();
       document.execCommand(
         "insertHTML",
         false,
         `<img src="${imageSrc}" alt="${file.name.replace(/"/g, "")}" style="max-width:100%;height:auto;" />`
       );
+      saveEditorSelection();
       syncEditorBody();
       showNotice("Image inserted");
     };
@@ -4879,7 +4994,7 @@ export default function Home() {
                 />
                 <button
                   type="button"
-                  onMouseDown={keepEditorFocus}
+                  onPointerDown={keepEditorFocus}
                   onClick={handleToolbarImageClick}
                   title={editorToolbarOpen ? "Insert image" : "Show formatting toolbar"}
                   aria-label={editorToolbarOpen ? "Insert image" : "Show formatting toolbar"}
@@ -4888,73 +5003,83 @@ export default function Home() {
                 </button>
                 {editorToolbarOpen ? (
                   <div className="format-toolbar" aria-label="Message formatting">
-                    <button className="close-format" type="button" onMouseDown={keepEditorFocus} onClick={() => setEditorToolbarOpen(false)} title="Hide toolbar" aria-label="Hide formatting toolbar">
+                    <button className="close-format" type="button" onPointerDown={keepEditorFocus} onClick={() => setEditorToolbarOpen(false)} title="Hide toolbar" aria-label="Hide formatting toolbar">
                       <X size={18} />
                     </button>
-                    <button aria-label="Bold" className={bodyBold ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Bold" className={bodyBold ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyBold((enabled) => !enabled);
                       runEditorCommand("bold");
                     }} title="Bold">
                       <Bold size={17} />
                     </button>
-                    <button aria-label="Italic" className={bodyItalic ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Italic" className={bodyItalic ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyItalic((enabled) => !enabled);
                       runEditorCommand("italic");
                     }} title="Italic">
                       <Italic size={17} />
                     </button>
-                    <button aria-label="Underline" className={bodyUnderline ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Underline" className={bodyUnderline ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyUnderline((enabled) => !enabled);
                       runEditorCommand("underline");
                     }} title="Underline">
                       <Underline size={17} />
                     </button>
-                    <button aria-label="Align left" className={bodyAlign === "left" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Align left" className={bodyAlign === "left" ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("left");
                       runEditorCommand("justifyLeft");
                     }} title="Align left">
                       <AlignLeft size={17} />
                     </button>
-                    <button aria-label="Align center" className={bodyAlign === "center" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Align center" className={bodyAlign === "center" ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("center");
                       runEditorCommand("justifyCenter");
                     }} title="Align center">
                       <AlignCenter size={17} />
                     </button>
-                    <button aria-label="Align right" className={bodyAlign === "right" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Align right" className={bodyAlign === "right" ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("right");
                       runEditorCommand("justifyRight");
                     }} title="Align right">
                       <AlignRight size={17} />
                     </button>
-                    <button aria-label="Justify" className={bodyAlign === "justify" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
+                    <button aria-label="Justify" className={bodyAlign === "justify" ? "active" : ""} type="button" onPointerDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("justify");
                       runEditorCommand("justifyFull");
                     }} title="Justify">
                       <AlignJustify size={17} />
                     </button>
-                    <select value={bodyFont} onChange={(event) => setEditorFont(event.target.value)} aria-label="Font family">
+                    <select
+                      value={bodyFont}
+                      onPointerDown={saveEditorSelection}
+                      onChange={(event) => setEditorFont(event.target.value)}
+                      aria-label="Font family"
+                    >
                       {COMPOSE_FONTS.map((font) => (
                         <option key={font} value={font}>
                           {font}
                         </option>
                       ))}
                     </select>
-                    <select value={bodySize} onChange={(event) => setEditorSize(event.target.value)} aria-label="Font size">
+                    <select
+                      value={bodySize}
+                      onPointerDown={saveEditorSelection}
+                      onChange={(event) => setEditorSize(event.target.value)}
+                      aria-label="Font size"
+                    >
                       {COMPOSE_FONT_SIZES.map((size) => (
                         <option key={size} value={size}>
                           {size}
                         </option>
                       ))}
                     </select>
-                    <label className="color-control" title="Text color" onMouseDown={keepEditorFocus}>
+                    <label className="color-control" title="Text color" onPointerDown={saveEditorSelection}>
                       <span>A</span>
                       <input aria-label="Text color" type="color" value={bodyColor} onChange={(event) => {
                         setBodyColor(event.target.value);
                         runEditorCommand("foreColor", event.target.value);
                       }} />
                     </label>
-                    <label className="color-control" title="Highlight color" onMouseDown={keepEditorFocus}>
+                    <label className="color-control" title="Highlight color" onPointerDown={saveEditorSelection}>
                       <Paintbrush size={17} />
                       <input aria-label="Highlight color" type="color" value={bodyHighlight} onChange={(event) => {
                         setBodyHighlight(event.target.value);
@@ -4973,9 +5098,13 @@ export default function Home() {
                 aria-label="Message body"
                 style={{ fontFamily: cssFontFamily(bodyFont), fontSize: bodySize, textAlign: bodyAlign }}
                 onInput={syncEditorBody}
-                onBlur={syncEditorBody}
-                onMouseUp={syncFormatState}
+                onBlur={() => {
+                  saveEditorSelection();
+                  syncEditorBody();
+                }}
+                onPointerUp={syncFormatState}
                 onKeyUp={syncFormatState}
+                onSelect={saveEditorSelection}
                 suppressContentEditableWarning
               />
             </div>
