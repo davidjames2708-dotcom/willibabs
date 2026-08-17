@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Priscilla Webmail",
+  title: "Willibabs Webmail",
   description: "A professional webmail workspace for client communication."
 };
 

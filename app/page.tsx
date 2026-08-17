@@ -2241,7 +2241,7 @@ export default function Home() {
     showNotice(permission === "granted" ? "Notifications enabled" : "Notifications not enabled");
 
     if (permission === "granted") {
-      new Notification("Priscilla Webmail", { body: "New mail notifications are ready." });
+      new Notification("Willibabs Webmail", { body: "New mail notifications are ready." });
     }
   }
 
@@ -3690,7 +3690,7 @@ export default function Home() {
               </label>
               <label>
                 <span>Organization</span>
-                <input defaultValue="Priscilla Webmail" />
+                <input defaultValue="Willibabs Webmail" />
               </label>
               <label>
                 <span>Reply-To</span>
