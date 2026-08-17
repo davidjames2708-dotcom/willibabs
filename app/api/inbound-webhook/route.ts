@@ -156,7 +156,7 @@ function messageFromEmail(email: ResendReceivedEmail, fallback: ResendWebhookEve
     date,
     unread: true,
     starred: false,
-    label: "Resend",
+    label: "Inbox",
     hasAttachment: Boolean(email.attachments?.length),
     attachmentName: firstAttachment?.filename,
     receivedAt

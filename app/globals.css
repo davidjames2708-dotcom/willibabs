@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #f5f7fb;
   --panel: #ffffff;
   --panel-soft: #f8fafc;
@@ -206,6 +206,10 @@ textarea:focus-visible {
   width: 100%;
 }
 
+.mobile-app-switcher {
+  display: none;
+}
+
 .folders {
   display: grid;
   gap: 4px;
@@ -328,7 +332,9 @@ textarea:focus-visible {
 .mail-workspace {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .top-bar,
@@ -426,6 +432,13 @@ textarea:focus-visible {
 
 .load-more {
   margin: 6px auto 12px;
+}
+
+.message-load-count {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 12px;
+  text-align: center;
 }
 
 .profile-chip {
@@ -748,6 +761,7 @@ textarea:focus-visible {
   display: grid;
   grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
   position: relative;
   z-index: 1;
 }
@@ -757,7 +771,9 @@ textarea:focus-visible {
   border-right: 1px solid var(--line);
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr);
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .inbox-summary {
@@ -995,8 +1011,9 @@ textarea:focus-visible {
 }
 
 .unread-dot {
-  background: var(--accent);
+  background: #16a34a;
   border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.12);
   flex: 0 0 auto;
   height: 8px;
   width: 8px;
@@ -1039,6 +1056,10 @@ textarea:focus-visible {
 
 .preview-actions {
   margin-bottom: 24px;
+}
+
+.mobile-preview-back {
+  display: none;
 }
 
 .preview-heading {
@@ -1101,6 +1122,18 @@ textarea:focus-visible {
 .preview-body p {
   margin: 0 0 14px;
 }
+
+.formatted-message-body {
+  color: inherit;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.formatted-message-body p,
+.formatted-message-body div {
+  margin: 0 0 14px;
+}
+
 
 .attachment-row {
   background: var(--panel-soft);
@@ -1328,6 +1361,11 @@ textarea:focus-visible {
   white-space: pre-wrap;
 }
 
+.rich-editor img {
+  height: auto;
+  max-width: 100%;
+}
+
 .editor-toolbar {
   align-items: center;
   background: #f3f6f8;
@@ -1380,12 +1418,12 @@ textarea:focus-visible {
 }
 
 .format-toolbar select {
-  min-width: 132px;
+  min-width: 168px;
   padding: 0 10px;
 }
 
 .format-toolbar select:nth-of-type(2) {
-  min-width: 92px;
+  min-width: 88px;
 }
 
 .color-control {
@@ -2903,6 +2941,8 @@ textarea:focus-visible {
 @media (max-width: 860px) {
   .webmail-shell {
     grid-template-columns: 58px minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 0;
   }
 
   .folder-pane {
@@ -2929,12 +2969,149 @@ textarea:focus-visible {
     display: grid;
   }
 
+  .mobile-app-switcher {
+    border-bottom: 1px solid var(--line-soft);
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-bottom: 12px;
+  }
+
+  .mobile-app-switcher button {
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    display: flex;
+    gap: 8px;
+    justify-content: flex-start;
+    min-height: 40px;
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .mobile-app-switcher button:hover,
+  .mobile-app-switcher button.active {
+    background: var(--accent-soft);
+    border-color: #b9d5ff;
+    color: var(--accent-strong);
+    font-weight: 700;
+  }
+
+  .mobile-app-switcher span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .mail-grid {
     grid-template-columns: 1fr;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .mail-workspace {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .top-bar,
+  .toolbar,
+  .advanced-search {
+    flex: 0 0 auto;
+  }
+
+  .message-pane {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .message-list {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .preview-pane {
     display: none;
+  }
+
+  .mail-grid.mobile-message-open .message-pane {
+    display: none;
+  }
+
+  .mail-grid.mobile-message-open .preview-pane {
+    display: block;
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mail-grid.mobile-message-open .message-preview {
+    border: 0;
+    box-shadow: none;
+    min-height: 100%;
+    padding: 16px;
+  }
+
+  .mobile-preview-back {
+    display: inline-flex;
+  }
+
+  .mobile-preview-back svg {
+    transform: rotate(90deg);
+  }
+
+  .preview-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .preview-actions button {
+    justify-content: center;
+  }
+
+  .preview-heading {
+    gap: 12px;
+    padding-bottom: 16px;
+  }
+
+  .preview-heading h2 {
+    font-size: 22px;
+    overflow-wrap: anywhere;
+  }
+
+  .sender-card {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .sender-card time {
+    flex-basis: 100%;
+    margin-left: 52px;
+  }
+
+  .preview-body {
+    font-size: 15px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+
+  .attachment-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .attachment-row button {
+    margin-left: 0;
   }
 
   .command-strip {
@@ -2944,11 +3121,179 @@ textarea:focus-visible {
   .command-side {
     padding-inline: 8px;
   }
+
+  .calendar-app {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+    width: 100%;
+  }
+
+  .calendar-sidebar {
+    display: none;
+  }
+
+  .calendar-main {
+    min-width: 0;
+    overflow: auto;
+  }
+
+  .calendar-topbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .calendar-range {
+    order: -1;
+    padding-top: 0;
+  }
+
+  .calendar-range strong,
+  .calendar-range span {
+    overflow-wrap: anywhere;
+  }
+
+  .calendar-nav-buttons {
+    justify-content: flex-start;
+    padding-left: 0;
+  }
+
+  .today-button {
+    margin-right: 0;
+    width: 92px;
+  }
+
+  .calendar-modebar {
+    overflow-x: auto;
+    padding: 6px 8px;
+  }
+
+  .calendar-modebar button {
+    flex: 0 0 auto;
+  }
+
+  .week-calendar {
+    overflow: auto;
+  }
+
+  .week-header,
+  .week-row {
+    grid-template-columns: 44px repeat(7, minmax(118px, 1fr));
+    min-width: 870px;
+  }
+
+  .day-calendar .week-header,
+  .day-calendar .week-row {
+    grid-template-columns: 44px minmax(260px, 1fr);
+    min-width: 360px;
+  }
+
+  .month-calendar {
+    grid-template-columns: repeat(7, minmax(46px, 1fr));
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  .month-calendar strong {
+    font-size: 11px;
+    height: 28px;
+  }
+
+  .month-calendar button {
+    min-height: 58px;
+    padding: 5px;
+  }
+
+  .month-calendar button span {
+    height: 24px;
+    width: 24px;
+  }
+
+  .agenda-list {
+    padding: 10px;
+  }
+
+  .roundcube-settings {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+    width: 100%;
+  }
+
+  .settings-taskbar,
+  .settings-section-list {
+    border-right: 0;
+    display: flex;
+    min-height: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    width: 100%;
+  }
+
+  .settings-title,
+  .settings-taskbar button,
+  .settings-section-list button {
+    flex: 0 0 auto;
+  }
+
+  .settings-title {
+    min-width: max-content;
+  }
+
+  .settings-taskbar button,
+  .settings-section-list button {
+    border-right: 1px solid #edf1f4;
+    min-height: 44px;
+    width: auto;
+  }
+
+  .settings-section-list {
+    padding-top: 0;
+  }
+
+  .settings-detail {
+    min-width: 0;
+    padding: 0 12px 20px;
+  }
+
+  .settings-detail-header {
+    margin: 0 -12px 16px;
+    min-height: 62px;
+    padding: 8px 12px;
+  }
+
+  .settings-detail-header h1 {
+    font-size: 20px;
+  }
+
+  .roundcube-form,
+  .folders-settings,
+  .responses-settings,
+  .domain-settings {
+    max-width: none;
+    width: 100%;
+  }
+
+  .roundcube-form label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .domain-summary,
+  .setup-status-panel,
+  .health-grid,
+  .dns-records article {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dns-records p {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 560px) {
   .webmail-shell {
     grid-template-columns: 1fr;
+    height: 100dvh;
+    min-height: 0;
   }
 
   .app-rail {

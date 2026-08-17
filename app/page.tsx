@@ -54,10 +54,20 @@ import {
   Paintbrush,
   X
 } from "lucide-react";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Folder = "Inbox" | "Starred" | "Drafts" | "Sent" | "Archive" | "Junk" | "Trash";
 type AppName = "Mail" | "Contacts" | "Calendar" | "Files" | "Settings";
+type MailboxProvider = "imap" | "resend" | "mixed" | "saved";
+type MailboxPageResponse = {
+  messages?: MailMessage[];
+  demo?: boolean;
+  provider?: MailboxProvider;
+  hasMore?: boolean;
+  total?: number;
+  message?: string;
+  error?: string;
+};
 type SendState = "idle" | "sending" | "sent" | "error";
 type SettingsGroup = "Preferences" | "Folders" | "Identities" | "Responses" | "Domain" | "Health";
 type CalendarMode = "Day" | "Week" | "Month" | "Agenda";
@@ -66,6 +76,13 @@ type SortingOrder = "ascending" | "descending";
 type ListMode = "List" | "Compact" | "Comfortable";
 type TextAlign = "left" | "center" | "right" | "justify";
 type MailboxMode = "demo" | "imap" | "resend";
+
+const COMPOSE_FONTS = ["Verdana", "Times New Roman", "Arial", "Georgia", "Tahoma", "Courier New"];
+const COMPOSE_FONT_SIZES = ["10pt", "12pt", "14pt", "16pt", "18pt", "20pt", "24pt", "36pt"];
+
+function cssFontFamily(font: string) {
+  return font.includes(" ") ? `"${font}", Times, serif` : font;
+}
 
 type FolderItem = {
   name: Folder;
@@ -219,9 +236,11 @@ type MailSetup = {
   updatedAt?: string;
 };
 
-const mailboxAddress = process.env.NEXT_PUBLIC_MAILBOX_ADDRESS ?? "support@willibabsdigitalsolutions.com";
+const mailboxAddress = process.env.NEXT_PUBLIC_MAILBOX_ADDRESS ?? "info@willibabsdigitalsolutions.com";
 const mailDomain = process.env.NEXT_PUBLIC_MAIL_DOMAIN ?? mailboxAddress.split("@")[1] ?? "example.com";
 const autoSyncMinutes = Number(process.env.NEXT_PUBLIC_AUTO_SYNC_MINUTES ?? 3);
+const mailboxPageSize = 300;
+const visibleMessageStep = 100;
 
 const refreshedMessage: MailMessage = {
   id: "m-refresh-001",
@@ -250,6 +269,19 @@ const emptyDraft: ComposeDraft = {
   subject: "",
   body: ""
 };
+
+const legacyMailboxAddress = "support@willibabsdigitalsolutions.com";
+
+function normalizeMailboxAddress(value = "") {
+  return value.replaceAll(legacyMailboxAddress, mailboxAddress);
+}
+
+function normalizeComposeDraft(draft: ComposeDraft): ComposeDraft {
+  return {
+    ...draft,
+    from: normalizeMailboxAddress(draft.from || mailboxAddress)
+  };
+}
 
 const emptyMailSetup: MailSetup = {
   mailboxAddress,
@@ -520,6 +552,72 @@ function htmlToReadableText(value = "") {
     .trim();
 }
 
+function sanitizeOutgoingHtml(value = "") {
+  if (typeof window !== "undefined") {
+    const parser = new window.DOMParser();
+    const parsedDocument = parser.parseFromString(value, "text/html");
+    const element = window.document.createElement("div");
+    element.innerHTML = parsedDocument.body?.innerHTML || value;
+    element.querySelectorAll("script, style, iframe, object, embed").forEach((node) => node.remove());
+    element.querySelectorAll("*").forEach((node) => {
+      Array.from(node.attributes).forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        const content = attribute.value.trim().toLowerCase();
+
+        if (name.startsWith("on") || ((name === "href" || name === "src") && content.startsWith("javascript:"))) {
+          node.removeAttribute(attribute.name);
+        }
+      });
+    });
+    return element.innerHTML.trim();
+  }
+
+  const bodyMatch = value.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+  const bodyStyle = bodyMatch?.[1].match(/style=["']([^"']*)["']/i)?.[1];
+  const html = bodyMatch?.[2] ?? value;
+  const wrappedHtml = bodyStyle ? `<div style="${bodyStyle}">${html}</div>` : html;
+
+  return wrappedHtml
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed[\s\S]*?<\/embed>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .trim();
+}
+
+function cleanOutgoingBody(value = "") {
+  const html = sanitizeOutgoingHtml(value);
+  const readable = htmlToReadableText(html)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!readable || readable === "..." || readable === "\u2026") {
+    return { html: "", text: "" };
+  }
+
+  return { html, text: readable };
+}
+function messageBodyLooksHtml(value = "") {
+  return /<\/?(?:html|body|div|p|span|strong|b|em|i|u|br|font|ul|ol|li|blockquote|table|tbody|tr|td|th|h[1-6])\b|\sstyle\s*=/i.test(value);
+}
+
+function renderMessageBody(message: MailMessage) {
+  const htmlBody = message.folder === "Sent" && message.body.some(messageBodyLooksHtml);
+
+  if (htmlBody) {
+    return (
+      <div
+        className="formatted-message-body"
+        dangerouslySetInnerHTML={{ __html: sanitizeOutgoingHtml(message.body.join("")) }}
+      />
+    );
+  }
+
+  return message.body.map((paragraph) => <p key={paragraph}>{htmlToReadableText(paragraph)}</p>);
+}
+
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
@@ -629,11 +727,14 @@ export default function Home() {
   const [draftSortingOrder, setDraftSortingOrder] = useState<SortingOrder>("descending");
   const [draftListMode, setDraftListMode] = useState<ListMode>("List");
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
+  const [folderHasMore, setFolderHasMore] = useState<Partial<Record<Folder, boolean>>>({});
+  const [folderMessageTotals, setFolderMessageTotals] = useState<Partial<Record<Folder, number>>>({});
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeDraft, setComposeDraft] = useState<ComposeDraft>(emptyDraft);
   const [recipientPickerOpen, setRecipientPickerOpen] = useState(false);
   const [showCcBcc, setShowCcBcc] = useState(false);
-  const [editorToolbarOpen, setEditorToolbarOpen] = useState(false);
+  const [editorToolbarOpen, setEditorToolbarOpen] = useState(true);
   const [bodyBold, setBodyBold] = useState(false);
   const [bodyItalic, setBodyItalic] = useState(false);
   const [bodyUnderline, setBodyUnderline] = useState(false);
@@ -646,6 +747,7 @@ export default function Home() {
   const [sendState, setSendState] = useState<SendState>("idle");
   const [sendError, setSendError] = useState("");
   const [mobileFoldersOpen, setMobileFoldersOpen] = useState(false);
+  const [mobileMessageOpen, setMobileMessageOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
@@ -744,8 +846,11 @@ export default function Home() {
   const [customFolders, setCustomFolders] = useState<string[]>([]);
   const [newFolderName, setNewFolderName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const contactImportRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const loginSubmitIntentRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -774,7 +879,7 @@ export default function Home() {
           return;
         }
 
-        setAuthenticated(Boolean(data.authenticated));
+        setAuthenticated(false);
         setLoginEmail(data.email || mailboxAddress);
         setMailboxMode(data.mode ?? "demo");
         setPasswordConfigured(Boolean(data.passwordConfigured));
@@ -788,6 +893,9 @@ export default function Home() {
             imapPass: "",
             smtpPass: ""
           }));
+        }
+        if (data.authenticated) {
+          await fetch("/api/logout", { method: "POST" }).catch(() => undefined);
         }
       } catch {
         if (mounted) {
@@ -813,7 +921,7 @@ export default function Home() {
     try {
       const savedDraft = window.localStorage.getItem("priscilla-compose-draft");
       if (savedDraft) {
-        setComposeDraft(JSON.parse(savedDraft) as ComposeDraft);
+        setComposeDraft(normalizeComposeDraft(JSON.parse(savedDraft) as ComposeDraft));
       }
     } catch {
       window.localStorage.removeItem("priscilla-compose-draft");
@@ -905,6 +1013,7 @@ export default function Home() {
       .catch(() => undefined);
 
     loadHealthReport(true);
+    refreshMailbox(true, "Inbox");
   }, [authenticated]);
 
   useEffect(() => {
@@ -1114,6 +1223,13 @@ export default function Home() {
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const submittedByUser = event.nativeEvent.isTrusted || loginSubmitIntentRef.current;
+    loginSubmitIntentRef.current = false;
+
+    if (!submittedByUser) {
+      return;
+    }
     setLoginLoading(true);
     setLoginError("");
 
@@ -1134,6 +1250,9 @@ export default function Home() {
       setMailboxMode(data.mode ?? "demo");
       setLoginError("");
       showNotice("Mailbox unlocked");
+      window.setTimeout(() => {
+        void refreshMailbox(true, "Inbox");
+      }, 0);
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Mailbox login failed.";
@@ -1141,6 +1260,12 @@ export default function Home() {
       setLoginError(message);
     } finally {
       setLoginLoading(false);
+    }
+  }
+
+  function markLoginSubmitIntent(event: KeyboardEvent<HTMLFormElement | HTMLButtonElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      loginSubmitIntentRef.current = true;
     }
   }
 
@@ -1197,6 +1322,7 @@ export default function Home() {
   function chooseApp(app: AppName) {
     setActiveApp(app);
     setMobileFoldersOpen(false);
+    setMobileMessageOpen(false);
     closeMenus();
     showNotice(`${app} opened`);
   }
@@ -1205,6 +1331,7 @@ export default function Home() {
     setActiveApp("Mail");
     setActiveFolder(folder);
     setMobileFoldersOpen(false);
+    setMobileMessageOpen(false);
     setSelectedMessageIds([]);
     setSelectMode(false);
     closeMenus();
@@ -1217,6 +1344,7 @@ export default function Home() {
     });
     setSelectedId(nextMessage?.id ?? "");
     showNotice(`${folder} opened`);
+    void refreshMailbox(true, folder);
   }
 
   function selectMessage(message: MailMessage) {
@@ -1225,10 +1353,18 @@ export default function Home() {
       return;
     }
 
+    const readMessage = { ...message, unread: false };
+
     setSelectedId(message.id);
+    setMobileMessageOpen(true);
     setMessages((currentMessages) =>
-      currentMessages.map((item) => (item.id === message.id ? { ...item, unread: false } : item))
+      currentMessages.map((item) => (item.id === message.id ? readMessage : item))
     );
+
+    if (message.unread) {
+      syncMailboxAction("mark-read", [message.id], undefined, [readMessage], true);
+    }
+
     showNotice("Message opened");
   }
 
@@ -1313,17 +1449,23 @@ export default function Home() {
     return targetIds.length;
   }
 
-  function syncMailboxAction(action: "move" | "mark-read" | "mark-unread" | "star" | "unstar" | "delete", ids: string[], folder?: Folder) {
-    const imapIds = ids.filter((id) => id.startsWith("imap-"));
-
-    if (!imapIds.length) {
+  function syncMailboxAction(
+    action: "move" | "mark-read" | "mark-unread" | "star" | "unstar" | "delete",
+    ids: string[],
+    folder?: Folder,
+    messageSnapshotsOverride?: MailMessage[],
+    silent = false
+  ) {
+    if (!ids.length) {
       return;
     }
+
+    const messageSnapshots = messageSnapshotsOverride ?? messages.filter((message) => ids.includes(message.id));
 
     fetch("/api/mailbox/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ids: imapIds, folder })
+      body: JSON.stringify({ action, ids, folder, messages: messageSnapshots })
     })
       .then(async (response) => {
         const data = (await response.json()) as { error?: string; demo?: boolean; message?: string };
@@ -1340,9 +1482,11 @@ export default function Home() {
         if (data.demo || data.message) {
           const message = data.message ?? "Mailbox action applied locally";
           setServerActionStatus(message);
-          showNotice(message);
+          if (!silent) {
+            showNotice(message);
+          }
         } else {
-          setServerActionStatus("Synced to IMAP");
+          setServerActionStatus("Mailbox action saved");
         }
       })
       .catch((error) => {
@@ -1376,8 +1520,8 @@ export default function Home() {
     }
 
     if (activeFolder === "Trash") {
-      setMessages((currentMessages) => currentMessages.filter((message) => !targetIds.includes(message.id)));
       syncMailboxAction("delete", targetIds);
+      setMessages((currentMessages) => currentMessages.filter((message) => !targetIds.includes(message.id)));
       setSelectedId("");
       setSelectedMessageIds([]);
       setSelectMode(false);
@@ -1388,7 +1532,7 @@ export default function Home() {
     setMessages((currentMessages) =>
       currentMessages.map((message) => (targetIds.includes(message.id) ? { ...message, folder: "Trash" } : message))
     );
-    syncMailboxAction("delete", targetIds);
+    syncMailboxAction("move", targetIds, "Trash");
     setSelectedId("");
     setSelectedMessageIds([]);
     setSelectMode(false);
@@ -1396,11 +1540,18 @@ export default function Home() {
   }
 
   function openCompose(prefill: Partial<ComposeDraft> = {}, showRecipientPicker = false) {
-    setComposeDraft((draft) => ({ ...draft, ...prefill }));
+    setComposeDraft((draft) => normalizeComposeDraft({ ...draft, ...prefill }));
     setAttachments([]);
     setRecipientPickerOpen(showRecipientPicker);
     setSendError("");
     setSendState("idle");
+    setEditorToolbarOpen(true);
+    setBodyBold(false);
+    setBodyItalic(false);
+    setBodyUnderline(false);
+    setBodyAlign("left");
+    setBodyFont(preferences.composeFont || "Verdana");
+    setBodySize("10pt");
     setComposeOpen(true);
   }
 
@@ -1497,7 +1648,7 @@ export default function Home() {
     openCompose({
       to: recipients.join(", "),
       subject: message.subject.startsWith("Re:") ? message.subject : `Re: ${message.subject}`,
-      body: quotedReplyBody(message)
+      body: ""
     });
     setSelectedMessageIds([]);
     setSelectMode(false);
@@ -1556,6 +1707,23 @@ export default function Home() {
     }
 
     if (action === "Delete") {
+      if (activeFolder === "Trash") {
+        const targetIds = actionTargetIds();
+
+        if (!targetIds.length) {
+          showNotice("Select a message first");
+          return;
+        }
+
+        syncMailboxAction("delete", targetIds);
+        setMessages((currentMessages) => currentMessages.filter((message) => !targetIds.includes(message.id)));
+        setSelectedId("");
+        setSelectedMessageIds([]);
+        setSelectMode(false);
+        showNotice(`${messageCountLabel(targetIds.length)} deleted`);
+        return;
+      }
+
       moveSelectedMessages("Trash");
       return;
     }
@@ -1654,7 +1822,7 @@ export default function Home() {
   }
 
   function updateDraft(field: keyof ComposeDraft, value: string) {
-    setComposeDraft((draft) => ({ ...draft, [field]: value }));
+    setComposeDraft((draft) => ({ ...draft, [field]: field === "from" ? normalizeMailboxAddress(value) : value }));
   }
 
   async function saveDraftToServer(silent = false) {
@@ -2054,35 +2222,127 @@ export default function Home() {
     showNotice("Cc and Bcc fields opened");
   }
 
-  function toggleEditorToolbar() {
-    setEditorToolbarOpen((open) => !open);
-    showNotice(editorToolbarOpen ? "Formatting toolbar hidden" : "Formatting toolbar opened");
+  function keepEditorFocus(event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
   }
 
   function syncEditorBody() {
     updateDraft("body", editorRef.current?.innerHTML ?? "");
   }
 
+  function syncFormatState() {
+    try {
+      setBodyBold(document.queryCommandState("bold"));
+      setBodyItalic(document.queryCommandState("italic"));
+      setBodyUnderline(document.queryCommandState("underline"));
+    } catch {
+      return;
+    }
+  }
+
   function runEditorCommand(command: string, value?: string) {
-    editorRef.current?.focus();
+    const editor = editorRef.current;
+
+    if (!editor) {
+      return;
+    }
+
+    editor.focus();
+    document.execCommand("styleWithCSS", false, "true");
     document.execCommand(command, false, value);
+
+    if (command === "hiliteColor") {
+      document.execCommand("backColor", false, value);
+    }
+
+    syncEditorBody();
+    syncFormatState();
+  }
+
+  function applySelectionOrEditorStyle(property: "fontFamily" | "fontSize", value: string) {
+    const editor = editorRef.current;
+
+    if (!editor) {
+      return;
+    }
+
+    editor.focus();
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const hasSelection = Boolean(
+      range && !range.collapsed && editor.contains(range.commonAncestorContainer)
+    );
+
+    if (hasSelection) {
+      document.execCommand("styleWithCSS", false, "false");
+      document.execCommand("fontSize", false, "7");
+      editor.querySelectorAll('font[size="7"]').forEach((node) => {
+        const span = document.createElement("span");
+        span.style[property] = value;
+        while (node.firstChild) {
+          span.appendChild(node.firstChild);
+        }
+        node.parentNode?.replaceChild(span, node);
+      });
+    }
+
+    editor.style[property] = value;
     syncEditorBody();
   }
 
   function setEditorFont(font: string) {
     setBodyFont(font);
-    runEditorCommand("fontName", font);
+    applySelectionOrEditorStyle("fontFamily", cssFontFamily(font));
   }
 
   function setEditorSize(size: string) {
     setBodySize(size);
-    const sizeMap: Record<string, string> = {
-      "10pt": "2",
-      "12pt": "3",
-      "14pt": "4",
-      "18pt": "5"
+    applySelectionOrEditorStyle("fontSize", size);
+  }
+
+  function handleToolbarImageClick() {
+    if (!editorToolbarOpen) {
+      setEditorToolbarOpen(true);
+      showNotice("Formatting toolbar opened");
+      return;
+    }
+
+    imageInputRef.current?.click();
+  }
+
+  function handleEditorImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      showNotice("Choose an image file");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const editor = editorRef.current;
+      const imageSrc = typeof reader.result === "string" ? reader.result : "";
+
+      if (!editor || !imageSrc) {
+        showNotice("Image could not be inserted");
+        return;
+      }
+
+      editor.focus();
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<img src="${imageSrc}" alt="${file.name.replace(/"/g, "")}" style="max-width:100%;height:auto;" />`
+      );
+      syncEditorBody();
+      showNotice("Image inserted");
     };
-    runEditorCommand("fontSize", sizeMap[size] ?? "2");
+    reader.readAsDataURL(file);
   }
 
   function openListOptions() {
@@ -2152,79 +2412,200 @@ export default function Home() {
     showNotice("Manage folders opened");
   }
 
-  async function refreshMailbox(silent = false) {
-    if (refreshing) {
+  function applyMailboxPage(data: MailboxPageResponse, syncFolder: Folder, offset: number) {
+    if (data.demo) {
+      setFolderHasMore((current) => ({ ...current, [syncFolder]: false }));
+      setMailboxMode("demo");
+      setLastSyncedAt(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
+      setMessages((currentMessages) => {
+        const alreadyAdded = currentMessages.some((message) => message.id === refreshedMessage.id);
+
+        if (alreadyAdded) {
+          return currentMessages.map((message) =>
+            message.id === refreshedMessage.id ? { ...message, time: "Just now", unread: true } : message
+          );
+        }
+
+        return [refreshedMessage, ...currentMessages];
+      });
+      setSelectedId(refreshedMessage.id);
       return;
     }
 
+    setMailboxMode(data.provider === "resend" ? "resend" : "imap");
+    setFolderHasMore((current) => ({ ...current, [syncFolder]: Boolean(data.hasMore) }));
+    setFolderMessageTotals((current) => ({ ...current, [syncFolder]: data.total ?? offset + (data.messages?.length ?? 0) }));
+    setLastSyncedAt(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
+
+    if (!data.messages?.length) {
+      if (offset === 0) {
+        setMessages((currentMessages) => currentMessages.filter((message) => message.folder !== syncFolder));
+        setSelectedId("");
+      }
+
+      return;
+    }
+
+    if (offset === 0) {
+      setVisibleLimit((limit) => Math.max(Math.min(limit, visibleMessageStep), Math.min(data.messages!.length, visibleMessageStep)));
+    }
+
+    setMessages((currentMessages) => {
+      const incomingIds = new Set(data.messages?.map((message) => message.id));
+
+      if (offset === 0) {
+        const otherMessages = currentMessages.filter(
+          (message) => message.folder !== syncFolder && !incomingIds.has(message.id)
+        );
+        return [...data.messages!, ...otherMessages];
+      }
+
+      const existingIds = new Set(currentMessages.map((message) => message.id));
+      const nextMessages = data.messages!.filter((message) => !existingIds.has(message.id));
+
+      return [...currentMessages, ...nextMessages];
+    });
+
+    if (offset === 0) {
+      setSelectedId(data.messages[0].id);
+    }
+  }
+
+  async function fetchMailboxPage(syncFolder: Folder, offset: number) {
+    const response = await fetch(`/api/mailbox?folder=${encodeURIComponent(syncFolder)}&limit=${mailboxPageSize}&offset=${offset}`);
+    const data = (await response.json()) as MailboxPageResponse;
+
+    if (handleUnauthorizedResponse(response)) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(data.error ?? "Mailbox refresh failed");
+    }
+
+    return data;
+  }
+
+  async function refreshMailbox(silent = false, targetFolder?: Folder) {
+    if (refreshInFlightRef.current) {
+      if (!silent) {
+        showNotice("Mailbox refresh is already running");
+      }
+      return;
+    }
+
+    const folderToSync = targetFolder ?? activeFolder;
+    const syncFolder = folderToSync === "Starred" ? "Inbox" : folderToSync;
+    let fastNoticeShown = false;
+    let fastTimer: number | undefined;
+
+    refreshInFlightRef.current = true;
     setRefreshing(true);
     closeMenus();
     setQuery("");
     setSelectedMessageIds([]);
     setSelectMode(false);
+    setActiveApp("Mail");
+    setActiveFolder(syncFolder);
+
     if (!silent) {
       showNotice("Refreshing mailbox...");
+      fastTimer = window.setTimeout(() => {
+        fastNoticeShown = true;
+        setRefreshing(false);
+        showNotice("Showing current messages. Loading the rest in the background...");
+      }, 300);
     }
 
     try {
-      const syncFolder = activeFolder === "Starred" ? "Inbox" : activeFolder;
-      const response = await fetch(`/api/mailbox?folder=${encodeURIComponent(syncFolder)}&limit=30`);
-      const data = (await response.json()) as { messages?: MailMessage[]; demo?: boolean; provider?: "imap" | "resend" | "mixed"; message?: string; error?: string };
+      let offset = 0;
+      let data = await fetchMailboxPage(syncFolder, offset);
+
+      if (!data) {
+        return;
+      }
+
+      applyMailboxPage(data, syncFolder, offset);
+
+      while (data.hasMore && data.messages?.length) {
+        offset += data.messages.length;
+        data = await fetchMailboxPage(syncFolder, offset);
+
+        if (!data) {
+          return;
+        }
+
+        applyMailboxPage(data, syncFolder, offset);
+      }
+
+      const providerName = data.provider === "resend" ? "Resend" : data.provider === "saved" ? "saved mail" : "IMAP";
+      if (!silent) {
+        showNotice(data.demo ? data.message ?? "Demo mailbox refreshed" : `${syncFolder} fully synced from ${providerName}`);
+      } else if (!fastNoticeShown) {
+        showNotice(`${syncFolder} auto-synced`);
+      }
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Mailbox refresh failed");
+    } finally {
+      refreshInFlightRef.current = false;
+      if (fastTimer) {
+        window.clearTimeout(fastTimer);
+      }
+      setRefreshing(false);
+    }
+  }
+
+  async function loadMoreMessages() {
+    if (visibleMessages.length > displayedMessages.length) {
+      setVisibleLimit((limit) => limit + visibleMessageStep);
+      return;
+    }
+
+    if (refreshing || loadingMoreMessages || query.trim() || activeFolder === "Starred" || !folderHasMore[activeFolder]) {
+      return;
+    }
+
+    const loadedCount = messages.filter((message) => message.folder === activeFolder).length;
+    setLoadingMoreMessages(true);
+
+    try {
+      const response = await fetch(`/api/mailbox?folder=${encodeURIComponent(activeFolder)}&limit=${mailboxPageSize}&offset=${loadedCount}`);
+      const data = (await response.json()) as MailboxPageResponse;
 
       if (handleUnauthorizedResponse(response)) {
         return;
       }
 
       if (!response.ok) {
-        throw new Error(data.error ?? "Mailbox refresh failed");
+        throw new Error(data.error ?? "More messages could not be loaded.");
       }
 
-      if (data.demo) {
-        setMailboxMode("demo");
-        setLastSyncedAt(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
+      if (data.messages?.length) {
         setMessages((currentMessages) => {
-          const alreadyAdded = currentMessages.some((message) => message.id === refreshedMessage.id);
+          const existingIds = new Set(currentMessages.map((message) => message.id));
+          const nextMessages = data.messages!.filter((message) => !existingIds.has(message.id));
 
-          if (alreadyAdded) {
-            return currentMessages.map((message) =>
-              message.id === refreshedMessage.id ? { ...message, time: "Just now", unread: true } : message
-            );
-          }
-
-          return [refreshedMessage, ...currentMessages];
+          return [...currentMessages, ...nextMessages];
         });
-        setSelectedId(refreshedMessage.id);
-        if (!silent) {
-          showNotice(data.message ?? "Demo mailbox refreshed");
-        }
-      } else if (data.messages?.length) {
-        setMailboxMode(data.provider === "resend" ? "resend" : "imap");
-        setLastSyncedAt(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
-        setMessages((currentMessages) => {
-          const incomingIds = new Set(data.messages?.map((message) => message.id));
-          const otherMessages = currentMessages.filter(
-            (message) => message.folder !== syncFolder && !incomingIds.has(message.id)
-          );
-          return [...data.messages!, ...otherMessages];
-        });
-        setSelectedId(data.messages[0].id);
-        showNotice(silent ? `${syncFolder} auto-synced` : `${syncFolder} synced from ${data.provider === "resend" ? "Resend" : "IMAP"}`);
-      } else {
-        setMailboxMode(data.provider === "resend" ? "resend" : "imap");
-        setLastSyncedAt(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
-        setMessages((currentMessages) => currentMessages.filter((message) => message.folder !== syncFolder));
-        setSelectedId("");
-        if (!silent) {
-          showNotice(data.message ?? "Mailbox synced: no messages found");
-        }
+        setVisibleLimit((limit) => limit + data.messages!.length);
+        setFolderMessageTotals((current) => ({ ...current, [activeFolder]: data.total ?? loadedCount + data.messages!.length }));
       }
 
-      setActiveApp("Mail");
-      setActiveFolder(syncFolder);
+      setFolderHasMore((current) => ({ ...current, [activeFolder]: Boolean(data.hasMore) }));
+      showNotice(data.hasMore ? `Loaded more ${activeFolder} messages` : `All loaded ${activeFolder} messages are visible`);
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "Mailbox refresh failed");
+      showNotice(error instanceof Error ? error.message : "More messages could not be loaded.");
     } finally {
-      setRefreshing(false);
+      setLoadingMoreMessages(false);
+    }
+  }
+
+  function handleMessageListScroll(event: UIEvent<HTMLDivElement>) {
+    const list = event.currentTarget;
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+
+    if (distanceFromBottom < 360) {
+      void loadMoreMessages();
     }
   }
 
@@ -2248,13 +2629,14 @@ export default function Home() {
 
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const cleanedBody = cleanOutgoingBody(editorRef.current?.innerHTML ?? composeDraft.body);
     const currentDraft = {
       ...composeDraft,
-      body: editorRef.current?.innerHTML ?? composeDraft.body
+      body: cleanedBody.html
     };
     setComposeDraft(currentDraft);
 
-    if (!currentDraft.to.trim() || !currentDraft.subject.trim() || !currentDraft.body.trim()) {
+    if (!currentDraft.to.trim() || !currentDraft.subject.trim() || !cleanedBody.text) {
       setSendState("error");
       setSendError("Recipient, subject, and message body are required.");
       return;
@@ -2273,15 +2655,27 @@ export default function Home() {
     setSendState("sending");
     setSendError("");
 
-    const response = await fetch("/api/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...currentDraft,
-        attachments
-      })
-    });
-    const data = (await response.json()) as { error?: string; demo?: boolean; message?: string; sentSynced?: boolean };
+    let data: { error?: string; demo?: boolean; message?: string; sentMessage?: MailMessage; sentSynced?: boolean; sentSyncPending?: boolean } = {};
+    let response: Response;
+
+    try {
+      response = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...currentDraft,
+          body: cleanedBody.html,
+          attachments
+        })
+      });
+      data = (await response.json().catch(() => ({}))) as typeof data;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The message could not be sent.";
+      setSendError(message);
+      setSendState("error");
+      showNotice("Message could not be sent");
+      return;
+    }
 
     if (handleUnauthorizedResponse(response)) {
       setSendState("idle");
@@ -2291,30 +2685,37 @@ export default function Home() {
     if (!response.ok) {
       setSendError(data.error ?? "The message could not be sent.");
       setSendState("error");
+      showNotice("Message could not be sent");
       return;
     }
 
-    const readableBody = htmlToReadableText(currentDraft.body);
-    const sentMessage: MailMessage = {
-      id: `m-${Date.now()}`,
-      folder: "Sent",
-      from: "Priscilla Mail",
-      fromEmail: currentDraft.from,
-      to: currentDraft.to,
-      subject: currentDraft.subject,
-      snippet: readableBody.slice(0, 120),
-      body: readableBody ? readableBody.split(/\n+/).filter(Boolean) : ["Message sent."],
-      time: "Just now",
-      date: "Today",
-      unread: false,
-      starred: false,
-      label: "Sent",
-      hasAttachment: attachments.length > 0,
-      attachmentName: attachments[0]?.name
-    };
+    const readableBody = cleanedBody.text;
+    const sentMessage: MailMessage = data.sentMessage
+      ? {
+          ...data.sentMessage,
+          time: data.sentMessage.time || "Just now",
+          date: data.sentMessage.date || "Today"
+        }
+      : {
+          id: `m-${Date.now()}`,
+          folder: "Sent",
+          from: "Priscilla Mail",
+          fromEmail: currentDraft.from,
+          to: currentDraft.to,
+          subject: currentDraft.subject,
+          snippet: readableBody.slice(0, 120),
+          body: cleanedBody.html ? [cleanedBody.html] : ["Message sent."],
+          time: "Just now",
+          date: "Today",
+          unread: false,
+          starred: false,
+          label: "Sent",
+          hasAttachment: attachments.length > 0,
+          attachmentName: attachments[0]?.name
+        };
 
     setMessages((currentMessages) => [sentMessage, ...currentMessages]);
-    setSentSyncStatus(data.demo ? "Demo Sent folder" : data.sentSynced ? "Synced to IMAP Sent" : "Sent, not copied to IMAP");
+    setSentSyncStatus(data.demo ? "Demo Sent folder" : data.sentSynced ? "Synced to IMAP Sent" : data.sentSyncPending ? "Sent sync continuing" : "Sent, not copied to IMAP");
     setSendState("sent");
     setComposeDraft(emptyDraft);
     setAttachments([]);
@@ -3004,10 +3405,11 @@ export default function Home() {
                   <label>
                     <span>Default font</span>
                     <select value={preferences.composeFont} onChange={(event) => setPreferences((current) => ({ ...current, composeFont: event.target.value }))}>
-                      <option>Verdana</option>
-                      <option>Arial</option>
-                      <option>Georgia</option>
-                      <option>Tahoma</option>
+                      {COMPOSE_FONTS.map((font) => (
+                        <option key={font} value={font}>
+                          {font}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <label>
@@ -3519,14 +3921,21 @@ export default function Home() {
   if (!authenticated) {
     return (
       <main className="mail-lock-screen">
-        <form className="mail-lock-card" onSubmit={resetMode ? handleResetPassword : handleLogin}>
+        <form
+          autoComplete="off"
+          className="mail-lock-card"
+          onKeyDown={markLoginSubmitIntent}
+          onSubmit={resetMode ? handleResetPassword : handleLogin}
+        >
           <div className="webmail-logo">Webmail</div>
           <label>
             <span>Email Address</span>
             <input
               autoFocus
+              autoComplete="username"
               type="email"
               disabled={loginLoading}
+              suppressHydrationWarning
               value={loginEmail}
               onChange={(event) => {
                 setLoginEmail(event.target.value);
@@ -3539,7 +3948,9 @@ export default function Home() {
               <span>Password</span>
               <input
                 type="password"
+                autoComplete="off"
                 disabled={loginLoading}
+                suppressHydrationWarning
                 value={loginPassword}
                 onChange={(event) => {
                   setLoginPassword(event.target.value);
@@ -3552,7 +3963,9 @@ export default function Home() {
               <label>
                 <span>Reset Code</span>
                 <input
+                  autoComplete="one-time-code"
                   type="password"
+                  suppressHydrationWarning
                   value={resetCode}
                   onChange={(event) => {
                     setResetCode(event.target.value);
@@ -3563,7 +3976,12 @@ export default function Home() {
               <label>
                 <span>New Password</span>
                 <input
+                  autoComplete="new-password"
+                  minLength={12}
+                  pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}"
+                  title="Use at least 12 characters with uppercase, lowercase, number, and symbol."
                   type="password"
+                  suppressHydrationWarning
                   value={resetPassword}
                   onChange={(event) => {
                     setResetPassword(event.target.value);
@@ -3574,7 +3992,10 @@ export default function Home() {
               <label>
                 <span>Confirm Password</span>
                 <input
+                  autoComplete="new-password"
+                  minLength={12}
                   type="password"
+                  suppressHydrationWarning
                   value={resetConfirmPassword}
                   onChange={(event) => {
                     setResetConfirmPassword(event.target.value);
@@ -3585,7 +4006,15 @@ export default function Home() {
             </>
           )}
           {loginError ? <p className="send-error">{loginError}</p> : null}
-          <button className="send-button webmail-login-button" type="submit" disabled={loginLoading}>
+          <button
+            className="send-button webmail-login-button"
+            type="submit"
+            disabled={loginLoading}
+            onKeyDown={markLoginSubmitIntent}
+            onPointerDown={() => {
+              loginSubmitIntentRef.current = true;
+            }}
+          >
             {resetMode ? "Reset Password" : loginLoading ? "Logging in..." : "Log in"}
           </button>
           <button
@@ -3680,6 +4109,25 @@ export default function Home() {
           <Edit3 size={17} />
           Compose
         </button>
+
+        <nav className="mobile-app-switcher" aria-label="Mobile apps">
+          {appRail.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <button
+                aria-label={item.label}
+                className={item.label === activeApp ? "active" : ""}
+                key={item.label}
+                onClick={() => chooseApp(item.label)}
+                title={item.label}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
         <nav className="folders" aria-label="Mailbox folders">
           {folders.map((folder) => {
@@ -4020,7 +4468,7 @@ export default function Home() {
         </div>
 
         {activeApp === "Mail" ? (
-          <div className="mail-grid">
+          <div className={mobileMessageOpen ? "mail-grid mobile-message-open" : "mail-grid"}>
             <section className="message-pane" aria-label="Message list">
               <div className="inbox-summary">
                 <div>
@@ -4040,7 +4488,10 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className={visibleMessages.length ? `message-list ${listMode.toLowerCase()}-mode` : "message-list empty-list"}>
+              <div
+                className={visibleMessages.length ? `message-list ${listMode.toLowerCase()}-mode` : "message-list empty-list"}
+                onScroll={handleMessageListScroll}
+              >
                 {visibleMessages.length ? (
                   <>
                   {displayedMessages.map((message) => (
@@ -4097,10 +4548,15 @@ export default function Home() {
                       </div>
                     </article>
                   ))}
-                  {visibleMessages.length > displayedMessages.length ? (
-                    <button className="load-more" onClick={() => setVisibleLimit((limit) => limit + 25)}>
-                      Load more messages
+                  {visibleMessages.length > displayedMessages.length || folderHasMore[activeFolder] ? (
+                    <button className="load-more" disabled={loadingMoreMessages} onClick={() => void loadMoreMessages()}>
+                      {loadingMoreMessages ? "Loading more messages..." : "Load more messages"}
                     </button>
+                  ) : null}
+                  {folderMessageTotals[activeFolder] ? (
+                    <p className="message-load-count">
+                      Showing {Math.min(displayedMessages.length, folderMessageTotals[activeFolder] ?? displayedMessages.length)} of {folderMessageTotals[activeFolder]} messages
+                    </p>
                   ) : null}
                   </>
                 ) : (
@@ -4117,6 +4573,13 @@ export default function Home() {
               {selectedMessage ? (
                 <article className="message-preview">
                   <div className="preview-actions">
+                    <button
+                      className="mobile-preview-back"
+                      onClick={() => setMobileMessageOpen(false)}
+                    >
+                      <ChevronDown size={17} />
+                      Back
+                    </button>
                     <button onClick={() => composeReply(false)}>
                       <Undo2 size={17} />
                       Reply
@@ -4163,9 +4626,7 @@ export default function Home() {
                     <time>{selectedMessage.date}</time>
                   </div>
                   <div className="preview-body">
-                    {selectedMessage.body.map((paragraph) => (
-                      <p key={paragraph}>{htmlToReadableText(paragraph)}</p>
-                    ))}
+                    {renderMessageBody(selectedMessage)}
                   </div>
                   {selectedMessage.hasAttachment ? (
                     <div className="attachment-row">
@@ -4408,77 +4869,92 @@ export default function Home() {
                 />
               </label>
               <div className="editor-toolbar">
-                <button type="button" onClick={toggleEditorToolbar} title="Show formatting toolbar" aria-label="Show formatting toolbar">
+                <input
+                  ref={imageInputRef}
+                  accept="image/*"
+                  aria-label="Insert image"
+                  hidden
+                  type="file"
+                  onChange={handleEditorImageChange}
+                />
+                <button
+                  type="button"
+                  onMouseDown={keepEditorFocus}
+                  onClick={handleToolbarImageClick}
+                  title={editorToolbarOpen ? "Insert image" : "Show formatting toolbar"}
+                  aria-label={editorToolbarOpen ? "Insert image" : "Show formatting toolbar"}
+                >
                   <Image size={18} />
                 </button>
                 {editorToolbarOpen ? (
                   <div className="format-toolbar" aria-label="Message formatting">
-                    <button className="close-format" type="button" onClick={() => setEditorToolbarOpen(false)} title="Hide toolbar" aria-label="Hide formatting toolbar">
+                    <button className="close-format" type="button" onMouseDown={keepEditorFocus} onClick={() => setEditorToolbarOpen(false)} title="Hide toolbar" aria-label="Hide formatting toolbar">
                       <X size={18} />
                     </button>
-                    <button aria-label="Bold" className={bodyBold ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Bold" className={bodyBold ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyBold((enabled) => !enabled);
                       runEditorCommand("bold");
                     }} title="Bold">
                       <Bold size={17} />
                     </button>
-                    <button aria-label="Italic" className={bodyItalic ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Italic" className={bodyItalic ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyItalic((enabled) => !enabled);
                       runEditorCommand("italic");
                     }} title="Italic">
                       <Italic size={17} />
                     </button>
-                    <button aria-label="Underline" className={bodyUnderline ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Underline" className={bodyUnderline ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyUnderline((enabled) => !enabled);
                       runEditorCommand("underline");
                     }} title="Underline">
                       <Underline size={17} />
                     </button>
-                    <button aria-label="Align left" className={bodyAlign === "left" ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Align left" className={bodyAlign === "left" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("left");
                       runEditorCommand("justifyLeft");
                     }} title="Align left">
                       <AlignLeft size={17} />
                     </button>
-                    <button aria-label="Align center" className={bodyAlign === "center" ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Align center" className={bodyAlign === "center" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("center");
                       runEditorCommand("justifyCenter");
                     }} title="Align center">
                       <AlignCenter size={17} />
                     </button>
-                    <button aria-label="Align right" className={bodyAlign === "right" ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Align right" className={bodyAlign === "right" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("right");
                       runEditorCommand("justifyRight");
                     }} title="Align right">
                       <AlignRight size={17} />
                     </button>
-                    <button aria-label="Justify" className={bodyAlign === "justify" ? "active" : ""} type="button" onClick={() => {
+                    <button aria-label="Justify" className={bodyAlign === "justify" ? "active" : ""} type="button" onMouseDown={keepEditorFocus} onClick={() => {
                       setBodyAlign("justify");
                       runEditorCommand("justifyFull");
                     }} title="Justify">
                       <AlignJustify size={17} />
                     </button>
                     <select value={bodyFont} onChange={(event) => setEditorFont(event.target.value)} aria-label="Font family">
-                      <option>Verdana</option>
-                      <option>Times New Roman</option>
-                      <option>Arial</option>
-                      <option>Georgia</option>
-                      <option>Tahoma</option>
+                      {COMPOSE_FONTS.map((font) => (
+                        <option key={font} value={font}>
+                          {font}
+                        </option>
+                      ))}
                     </select>
                     <select value={bodySize} onChange={(event) => setEditorSize(event.target.value)} aria-label="Font size">
-                      <option>10pt</option>
-                      <option>12pt</option>
-                      <option>14pt</option>
-                      <option>18pt</option>
+                      {COMPOSE_FONT_SIZES.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
                     </select>
-                    <label className="color-control" title="Text color">
+                    <label className="color-control" title="Text color" onMouseDown={keepEditorFocus}>
                       <span>A</span>
                       <input aria-label="Text color" type="color" value={bodyColor} onChange={(event) => {
                         setBodyColor(event.target.value);
                         runEditorCommand("foreColor", event.target.value);
                       }} />
                     </label>
-                    <label className="color-control" title="Highlight color">
+                    <label className="color-control" title="Highlight color" onMouseDown={keepEditorFocus}>
                       <Paintbrush size={17} />
                       <input aria-label="Highlight color" type="color" value={bodyHighlight} onChange={(event) => {
                         setBodyHighlight(event.target.value);
@@ -4495,8 +4971,11 @@ export default function Home() {
                 role="textbox"
                 aria-multiline="true"
                 aria-label="Message body"
+                style={{ fontFamily: cssFontFamily(bodyFont), fontSize: bodySize, textAlign: bodyAlign }}
                 onInput={syncEditorBody}
                 onBlur={syncEditorBody}
+                onMouseUp={syncFormatState}
+                onKeyUp={syncFormatState}
                 suppressContentEditableWarning
               />
             </div>

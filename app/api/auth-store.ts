@@ -19,9 +19,25 @@ function hashPassword(password: string, salt: string) {
   return crypto.pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("base64url");
 }
 
+function isAuthRecord(value: unknown): value is AuthRecord {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Partial<AuthRecord>;
+  return Boolean(record.email && record.salt && record.hash);
+}
+
 async function readAuthRecords() {
   try {
-    return JSON.parse(await fs.readFile(authPath, "utf8")) as AuthRecord[];
+    const parsed = JSON.parse(await fs.readFile(authPath, "utf8")) as unknown;
+
+    if (Array.isArray(parsed)) {
+      return parsed.filter(isAuthRecord);
+    }
+
+    // Older builds stored one account as a single object instead of an array.
+    return isAuthRecord(parsed) ? [parsed] : [];
   } catch {
     return [];
   }
@@ -91,4 +107,17 @@ export function configuredLoginEmail() {
 
 export function configuredLoginPassword() {
   return process.env.WEBMAIL_LOGIN_PASSWORD || process.env.MAILBOX_PASSWORD || process.env.IMAP_PASS || process.env.SMTP_PASS || "";
+}
+
+export function configuredLoginPasswords() {
+  return Array.from(
+    new Set(
+      [
+        process.env.WEBMAIL_LOGIN_PASSWORD,
+        process.env.MAILBOX_PASSWORD,
+        process.env.IMAP_PASS,
+        process.env.SMTP_PASS
+      ].filter((password): password is string => Boolean(password))
+    )
+  );
 }

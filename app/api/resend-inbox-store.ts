@@ -65,7 +65,7 @@ async function ensureInboxTable() {
       display_date text NOT NULL DEFAULT '',
       unread boolean NOT NULL DEFAULT true,
       starred boolean NOT NULL DEFAULT false,
-      label text NOT NULL DEFAULT 'Resend',
+      label text NOT NULL DEFAULT 'Inbox',
       has_attachment boolean NOT NULL DEFAULT false,
       attachment_name text,
       received_at timestamptz NOT NULL DEFAULT now(),
@@ -90,7 +90,7 @@ function rowToMessage(row: InboxRow): StoredInboxMessage {
     date: row.display_date,
     unread: row.unread,
     starred: row.starred,
-    label: row.label,
+    label: row.label === "Resend" ? "Inbox" : row.label,
     hasAttachment: row.has_attachment,
     attachmentName: row.attachment_name ?? undefined,
     receivedAt: row.received_at
@@ -101,7 +101,7 @@ export function isNeonInboxConfigured() {
   return Boolean(process.env.DATABASE_URL);
 }
 
-export async function readResendInbox(limit = 50) {
+export async function readResendInbox(limit = 50, offset = 0) {
   const sql = await ensureInboxTable();
 
   if (!sql) {
@@ -128,6 +128,7 @@ export async function readResendInbox(limit = 50) {
     FROM resend_inbox_messages
     ORDER BY received_at DESC
     LIMIT ${limit}
+    OFFSET ${offset}
   ` as InboxRow[];
 
   return rows.map(rowToMessage);

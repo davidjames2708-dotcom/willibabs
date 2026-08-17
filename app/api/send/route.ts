@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+﻿import { after, NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
 import { getSession, requireSession } from "../session-utils";
+import { saveStoredSentMessage } from "../sent-store";
 import { isSmtpConfigured, readMailSetup } from "../setup-store";
 
 export const runtime = "nodejs";
@@ -25,7 +26,70 @@ function header(value = "") {
 }
 
 function htmlToText(value: string) {
-  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|tr|h[1-6])>/gi, "\n")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function sanitizeEmailHtml(value: string) {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed[\s\S]*?<\/embed>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, '$1="#"')
+    .replace(/<font\s+([^>]*)>/gi, (_match, attrs: string) => {
+      const styles: string[] = [];
+      const face = attrs.match(/face=["']?([^"' >]+)/i)?.[1];
+      const color = attrs.match(/color=["']?([^"' >]+)/i)?.[1];
+      const size = attrs.match(/size=["']?([^"' >]+)/i)?.[1];
+      const sizeMap: Record<string, string> = { "1": "8pt", "2": "10pt", "3": "12pt", "4": "14pt", "5": "18pt", "6": "24pt", "7": "32pt" };
+
+      if (face) {
+        styles.push(`font-family: ${face}`);
+      }
+      if (color) {
+        styles.push(`color: ${color}`);
+      }
+      if (size && sizeMap[size]) {
+        styles.push(`font-size: ${sizeMap[size]}`);
+      }
+
+      return styles.length ? `<span style="${styles.join("; ")}">` : "<span>";
+    })
+    .replace(/<\/font>/gi, "</span>")
+    .trim();
+}
+
+function emailHtmlBody(value: string) {
+  const sanitized = sanitizeEmailHtml(value);
+
+  if (!sanitized) {
+    return "";
+  }
+
+  return `<!doctype html><html><body style="margin:0; font-family: Arial, Helvetica, sans-serif; font-size:14px; line-height:1.5; color:#111827;">${sanitized}</body></html>`;
+}
+
+function cleanOutgoingBody(value: string) {
+  const html = sanitizeEmailHtml(value);
+  const readable = htmlToText(html);
+
+  if (!readable || readable === "..." || readable === "â€¦" || readable === "…") {
+    return { html: "", text: "" };
+  }
+
+  return { html: emailHtmlBody(html), text: readable };
 }
 
 function emailOnly(value: string) {
@@ -47,10 +111,6 @@ function isValidEmailAddress(value: string) {
 
 function invalidRecipients(...values: Array<string | undefined>) {
   return values.flatMap((value) => splitRecipients(value ?? "")).filter((recipient) => !isValidEmailAddress(recipient));
-}
-
-function htmlBody(value: string) {
-  return value.includes("<") ? value : value.replace(/\n/g, "<br />");
 }
 
 function resendConfigured() {
@@ -79,7 +139,7 @@ async function sendWithResend(message: {
       bcc: splitRecipients(message.bcc),
       subject: message.subject,
       text: htmlToText(message.body),
-      html: htmlBody(message.body),
+      html: message.body,
       attachments: message.attachments
         ?.filter((attachment) => attachment.name && attachment.content)
         .map((attachment) => ({
@@ -142,7 +202,7 @@ async function appendToSentFolder(message: {
     "MIME-Version: 1.0",
     "Content-Type: text/html; charset=utf-8",
     "",
-    message.body.includes("<") ? message.body : htmlToText(message.body).replace(/\n/g, "<br />")
+    message.body
   ]
     .filter(Boolean)
     .join("\r\n");
@@ -154,6 +214,29 @@ async function appendToSentFolder(message: {
   } finally {
     await client.logout().catch(() => undefined);
   }
+}
+
+async function saveSentMessageFallback(message: {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  attachments?: SendPayload["attachments"];
+}) {
+  return saveStoredSentMessage(message).catch(() => null);
+}
+
+function syncSentAfterResponse(message: {
+  from: string;
+  to: string;
+  cc?: string;
+  bcc?: string;
+  subject: string;
+  body: string;
+}) {
+  after(async () => {
+    await appendToSentFolder(message).catch(() => false);
+  });
 }
 
 export async function POST(request: Request) {
@@ -190,18 +273,36 @@ export async function POST(request: Request) {
   const user = setup.smtpUser || session?.email || "";
   const pass = setup.smtpPass || session?.password || "";
   const from = setup.mailFrom || requestedFrom || user;
+  const cleanBody = cleanOutgoingBody(body);
+
+  if (!cleanBody.text) {
+    return NextResponse.json(
+      { error: "Message body is required." },
+      { status: 400 }
+    );
+  }
 
   if (resendConfigured()) {
-    const resendId = await sendWithResend({ from, to, cc, bcc, subject, body, attachments });
-    const sentSynced = await appendToSentFolder({ from, to, cc, bcc, subject, body }).catch(() => false);
+    try {
+      const resendId = await sendWithResend({ from, to, cc, bcc, subject, body: cleanBody.html, attachments });
+      const sentMessage = await saveSentMessageFallback({ from, to, subject, body: cleanBody.html, attachments });
+      syncSentAfterResponse({ from, to, cc, bcc, subject, body: cleanBody.html });
 
-    return NextResponse.json({ ok: true, provider: "resend", resendId, sentSynced });
+      return NextResponse.json({ ok: true, provider: "resend", resendId, sentMessage, sentSyncPending: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Resend could not send the email.";
+
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
   }
 
   if (!isSmtpConfigured({ ...setup, smtpUser: user, smtpPass: pass, mailFrom: from })) {
+    const sentMessage = await saveSentMessageFallback({ from, to, subject, body: cleanBody.html, attachments });
+
     return NextResponse.json({
       ok: true,
       demo: true,
+      sentMessage,
       message: "Resend or SMTP is not configured, so the message was saved to the demo Sent folder."
     });
   }
@@ -213,25 +314,32 @@ export async function POST(request: Request) {
     auth: { user, pass }
   });
 
-  await transporter.sendMail({
-    from,
-    to,
-    cc,
-    bcc,
-    subject,
-    text: body,
-    html: htmlBody(body),
-    attachments: attachments
-      .filter((attachment) => attachment.name && attachment.content)
-      .map((attachment) => ({
-        filename: attachment.name,
-        content: attachment.content,
-        encoding: "base64",
-        contentType: attachment.type
-      }))
-  });
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      cc,
+      bcc,
+      subject,
+      text: cleanBody.text,
+      html: cleanBody.html,
+      attachments: attachments
+        .filter((attachment) => attachment.name && attachment.content)
+        .map((attachment) => ({
+          filename: attachment.name,
+          content: attachment.content,
+          encoding: "base64",
+          contentType: attachment.type
+        }))
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "SMTP could not send the email.";
 
-  const sentSynced = await appendToSentFolder({ from, to, cc, bcc, subject, body }).catch(() => false);
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
 
-  return NextResponse.json({ ok: true, sentSynced });
+  const sentMessage = await saveSentMessageFallback({ from, to, subject, body: cleanBody.html, attachments });
+  syncSentAfterResponse({ from, to, cc, bcc, subject, body: cleanBody.html });
+
+  return NextResponse.json({ ok: true, sentMessage, sentSyncPending: true });
 }
