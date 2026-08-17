@@ -1196,17 +1196,16 @@ textarea:focus-visible {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   box-shadow: var(--shadow);
-  display: grid;
-  grid-template-rows: 48px minmax(0, 1fr) auto auto;
-  max-height: min(720px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  max-height: min(720px, calc(100dvh - 48px));
   overflow: hidden;
   width: min(720px, calc(100vw - 48px));
 }
 
 .roundcube-compose {
   border-radius: 0;
-  grid-template-rows: 48px auto auto auto auto;
-  max-height: min(820px, calc(100vh - 48px));
+  max-height: min(820px, calc(100dvh - 48px));
   width: min(900px, calc(100vw - 48px));
 }
 
@@ -1215,6 +1214,7 @@ textarea:focus-visible {
   background: #111827;
   color: #ffffff;
   display: flex;
+  flex: 0 0 auto;
   justify-content: space-between;
   padding: 0 14px;
 }
@@ -1231,7 +1231,9 @@ textarea:focus-visible {
 
 .compose-fields {
   display: grid;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: auto;
 }
 
 .compose-row {
@@ -1353,7 +1355,7 @@ textarea:focus-visible {
   font-family: Verdana, Arial, sans-serif;
   font-size: 10pt;
   line-height: 1.5;
-  min-height: 300px;
+  min-height: 220px;
   outline: 0;
   overflow: auto;
   padding: 14px;
@@ -1459,8 +1461,28 @@ textarea:focus-visible {
 }
 
 .compose-footer {
+  align-items: center;
+  background: #ffffff;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-left: 0;
   padding: 12px;
+  width: 100%;
+}
+
+.compose-footer .secondary-action {
+  flex: 0 0 auto;
+  margin-right: 0;
+}
+
+.compose-footer .send-button {
+  flex: 1 1 140px;
+  margin-left: auto;
+  min-height: 48px;
+  min-width: 140px;
+  padding: 0 20px;
 }
 
 .secondary-action {
@@ -1884,6 +1906,7 @@ textarea:focus-visible {
 .compose-attachments {
   border-bottom: 1px solid var(--line-soft);
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 12px;
@@ -3091,6 +3114,36 @@ textarea:focus-visible {
     overflow-wrap: anywhere;
   }
 
+  .compose-backdrop {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+
+  .compose-window,
+  .roundcube-compose {
+    border-radius: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 100%;
+  }
+
+  .compose-footer {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .compose-footer .send-button {
+    font-size: 17px;
+    grid-column: 1 / -1;
+    margin-left: 0;
+    min-height: 52px;
+    min-width: 0;
+    width: 100%;
+  }
+
   .sender-card {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -3289,6 +3342,40 @@ textarea:focus-visible {
   .dns-records p {
     grid-column: auto;
   }
+
+  .compose-backdrop {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+
+  .compose-window,
+  .roundcube-compose {
+    border-radius: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 100%;
+  }
+
+  .rich-editor {
+    min-height: 160px;
+  }
+
+  .compose-footer {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .compose-footer .send-button {
+    font-size: 17px;
+    grid-column: 1 / -1;
+    margin-left: 0;
+    min-height: 52px;
+    min-width: 0;
+    width: 100%;
+  }
 }
 
 @media (max-width: 560px) {
@@ -3322,10 +3409,36 @@ textarea:focus-visible {
   }
 
   .compose-backdrop {
-    padding: 10px;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
   }
 
-  .compose-window {
+  .compose-window,
+  .roundcube-compose {
+    border-radius: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    width: 100%;
+  }
+
+  .rich-editor {
+    min-height: 160px;
+  }
+
+  .compose-footer {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .compose-footer .send-button {
+    font-size: 17px;
+    grid-column: 1 / -1;
+    margin-left: 0;
+    min-height: 52px;
+    min-width: 0;
     width: 100%;
   }
 
