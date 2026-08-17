@@ -1216,7 +1216,8 @@ textarea:focus-visible {
   display: flex;
   flex: 0 0 auto;
   justify-content: space-between;
-  padding: 0 14px;
+  min-height: 44px;
+  padding: 0 12px;
 }
 
 .compose-header button {
@@ -1240,24 +1241,27 @@ textarea:focus-visible {
   align-items: center;
   border-bottom: 0;
   display: grid;
-  gap: 12px;
-  grid-template-columns: 132px minmax(0, 1fr) auto auto;
-  min-height: 40px;
-  padding: 4px 12px;
+  gap: 8px;
+  grid-template-columns: 64px minmax(0, 1fr) auto auto;
+  min-height: 36px;
+  padding: 2px 12px;
 }
 
 .compose-row span {
   color: #0f1f2e;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
+  line-height: 1;
 }
 
 .compose-row input {
   border: 1px solid #cbd5dd;
   border-radius: 4px;
-  min-height: 34px;
+  min-height: 32px;
+  min-width: 0;
   outline: 0;
   padding: 0 10px;
+  width: 100%;
 }
 
 .compose-row button {
@@ -1267,10 +1271,10 @@ textarea:focus-visible {
   border-radius: 0;
   color: #0f1f2e;
   display: grid;
-  height: 34px;
+  height: 32px;
   padding: 0;
   place-items: center;
-  width: 34px;
+  width: 32px;
 }
 
 .compose-row button:hover {
@@ -1282,7 +1286,7 @@ textarea:focus-visible {
   border-bottom: 1px solid #d9e2ea;
   display: grid;
   gap: 10px;
-  padding: 8px 12px 12px 144px;
+  padding: 8px 12px 12px 84px;
 }
 
 .recipient-picker-heading {
@@ -1376,8 +1380,8 @@ textarea:focus-visible {
   border: 1px solid #cbd5dd;
   border-bottom: 0;
   display: flex;
-  margin: 4px 12px 0;
-  min-height: 32px;
+  margin: 2px 12px 0;
+  min-height: 30px;
   padding: 0;
 }
 
@@ -1465,24 +1469,26 @@ textarea:focus-visible {
   background: #ffffff;
   display: flex;
   flex: 0 0 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   margin-left: 0;
-  padding: 12px;
+  padding: 8px 12px;
   width: 100%;
 }
 
 .compose-footer .secondary-action {
   flex: 0 0 auto;
   margin-right: 0;
+  min-height: 40px;
+  padding: 0 10px;
 }
 
 .compose-footer .send-button {
-  flex: 1 1 140px;
+  flex: 0 0 auto;
   margin-left: auto;
-  min-height: 48px;
-  min-width: 140px;
-  padding: 0 20px;
+  min-height: 40px;
+  min-width: 96px;
+  padding: 0 16px;
 }
 
 .secondary-action {
@@ -3358,23 +3364,39 @@ textarea:focus-visible {
   }
 
   .rich-editor {
-    min-height: 160px;
+    min-height: 140px;
+  }
+
+  .compose-row {
+    gap: 6px;
+    grid-template-columns: 52px minmax(0, 1fr) auto auto;
+    min-height: 34px;
+    padding: 2px 10px;
+  }
+
+  .compose-row span {
+    font-size: 13px;
   }
 
   .compose-footer {
-    display: grid;
-    gap: 8px;
-    grid-template-columns: 1fr 1fr;
-    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .compose-footer .secondary-action,
+  .compose-footer .send-button {
+    min-height: 40px;
   }
 
   .compose-footer .send-button {
-    font-size: 17px;
-    grid-column: 1 / -1;
-    margin-left: 0;
-    min-height: 52px;
-    min-width: 0;
-    width: 100%;
+    flex: 0 0 auto;
+    font-size: 14px;
+    margin-left: auto;
+    min-width: 88px;
+    padding: 0 14px;
+    width: auto;
   }
 }
 
@@ -3423,31 +3445,30 @@ textarea:focus-visible {
   }
 
   .rich-editor {
-    min-height: 160px;
+    min-height: 140px;
   }
 
   .compose-footer {
-    display: grid;
-    gap: 8px;
-    grid-template-columns: 1fr 1fr;
-    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   }
 
   .compose-footer .send-button {
-    font-size: 17px;
-    grid-column: 1 / -1;
-    margin-left: 0;
-    min-height: 52px;
-    min-width: 0;
-    width: 100%;
+    flex: 0 0 auto;
+    font-size: 14px;
+    margin-left: auto;
+    min-height: 40px;
+    min-width: 88px;
+    width: auto;
   }
 
   .compose-row {
-    grid-template-columns: 1fr auto auto;
-  }
-
-  .compose-row span {
-    grid-column: 1 / -1;
+    gap: 6px;
+    grid-template-columns: 52px minmax(0, 1fr) auto auto;
+    min-height: 34px;
+    padding: 2px 10px;
   }
 
   .recipient-picker {
