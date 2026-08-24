@@ -12,7 +12,7 @@ export async function GET() {
   const sendingConfigured = isResendConfigured() || isSmtpConfigured(setup);
   return NextResponse.json({
     ok: true,
-    authenticated: false,
+    authenticated: Boolean(session),
     email: session?.email || configuredLoginEmail() || (await firstLocalLoginEmail()) || setup.mailboxAddress,
     mode: (await configuredClient()) ? "imap" : "demo",
     setup: publicMailSetup(setup),
