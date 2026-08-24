@@ -81,54 +81,9 @@ function genericResetError(status = 401) {
   return NextResponse.json({ error: "Password reset could not be completed. Check the details and try again." }, { status });
 }
 
-export async function POST(request: Request) {
-  const { email, resetCode, password, confirmPassword } = (await request.json()) as {
-    email?: string;
-    resetCode?: string;
-    password?: string;
-    confirmPassword?: string;
-  };
-  const normalizedEmail = normalizeEmail(email);
-  const expectedEmail = configuredLoginEmail();
-  const configuredResetCode = process.env.WEBMAIL_RESET_CODE;
-  const key = attemptKey(normalizedEmail, request);
-
-  if (!configuredResetCode) {
-    return NextResponse.json({ error: "Password reset is not configured. Add WEBMAIL_RESET_CODE on the server." }, { status: 503 });
-  }
-
-  if (isLocked(key)) {
-    return NextResponse.json({ error: "Too many reset attempts. Try again later." }, { status: 429 });
-  }
-
-  if (!normalizedEmail || !resetCode || !password || !confirmPassword) {
-    recordFailedAttempt(key);
-    return genericResetError(400);
-  }
-
-  if (expectedEmail && normalizedEmail !== expectedEmail) {
-    recordFailedAttempt(key);
-    return genericResetError();
-  }
-
-  if (resetCode !== configuredResetCode) {
-    recordFailedAttempt(key);
-    return genericResetError();
-  }
-
-  if (password !== confirmPassword) {
-    return NextResponse.json({ error: "The new passwords do not match." }, { status: 400 });
-  }
-
-  if (!hasStrongPassword(password)) {
-    return NextResponse.json({ error: "Use at least 12 characters with uppercase, lowercase, number, and symbol." }, { status: 400 });
-  }
-
-  await setLocalPassword(normalizedEmail, password);
-  resetAttempt(key);
-
-  return NextResponse.json({
-    ok: true,
-    message: "Password reset. You can log in with the new password now."
-  });
+export async function POST() {
+  return NextResponse.json(
+    { error: "Password reset is turned off on this portfolio demo." },
+    { status: 403 },
+  );
 }

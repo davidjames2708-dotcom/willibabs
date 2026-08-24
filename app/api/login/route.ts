@@ -127,68 +127,9 @@ async function validateImapLogin(email: string, password: string) {
   }
 }
 
-export async function POST(request: Request) {
-  const { email, password } = (await request.json()) as { email?: string; password?: string };
-  const setup = await readMailSetup();
-  const normalizedEmail = normalizeEmail(email);
-  const key = attemptKey(normalizedEmail, request);
-  const expectedEmail = configuredLoginEmail() || normalizeEmail(setup.mailboxAddress);
-  const configuredPassword = configuredLoginPassword();
-  const configuredPasswords = configuredLoginPasswords();
-  const localAuthExists = await hasAnyLocalPassword();
-
-  if (isLocked(key)) {
-    return NextResponse.json({ error: "Too many failed login attempts. Try again later." }, { status: 429 });
-  }
-
-  if (!normalizedEmail || !password) {
-    recordFailedAttempt(key);
-    return NextResponse.json({ error: "Email address and password are required." }, { status: 400 });
-  }
-
-  if (expectedEmail && localAuthExists && normalizedEmail !== expectedEmail) {
-    recordFailedAttempt(key);
-    return NextResponse.json({ error: "This mailbox is not available on this webmail." }, { status: 401 });
-  }
-
-  let authenticated = false;
-  let imapError = "";
-
-  if (configuredPasswords.length) {
-    authenticated = configuredPasswords.includes(password);
-  }
-
-  if (!authenticated && (await hasLocalPassword(normalizedEmail))) {
-    authenticated = await validateLocalPassword(normalizedEmail, password);
-  }
-
-  if (!authenticated && setup.imapHost) {
-    try {
-      authenticated = await validateImapLogin(normalizedEmail, password);
-    } catch (error) {
-      imapError = imapLoginMessage(error, setup.imapHost, setup.imapPort);
-    }
-  }
-
-  if (!authenticated && !localAuthExists && !configuredPassword && !setup.imapHost) {
-    if (password.length < 8) {
-      return NextResponse.json({ error: "Use at least 8 characters for the first login password." }, { status: 400 });
-    }
-
-    await setLocalPassword(normalizedEmail, password);
-    authenticated = true;
-  }
-
-  if (!authenticated) {
-    recordFailedAttempt(key);
-    return NextResponse.json({ error: "Invalid email address or password." }, { status: 401 });
-  }
-
-  resetAttempt(key);
-
-  const client = await configuredClient();
-  const response = NextResponse.json({ ok: true, mode: client ? "imap" : "demo", warning: imapError || undefined });
-  await setSessionCookie(response, normalizedEmail, password);
-
-  return response;
+export async function POST() {
+  return NextResponse.json(
+    { error: "Mailbox login is turned off on this portfolio demo." },
+    { status: 403 },
+  );
 }

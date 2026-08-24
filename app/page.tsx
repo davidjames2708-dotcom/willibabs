@@ -4036,114 +4036,20 @@ export default function Home() {
   if (!authenticated) {
     return (
       <main className="mail-lock-screen">
-        <form
-          autoComplete="off"
-          className="mail-lock-card"
-          onKeyDown={markLoginSubmitIntent}
-          onSubmit={resetMode ? handleResetPassword : handleLogin}
-        >
+        <section className="mail-lock-card">
           <div className="webmail-logo">Webmail</div>
+          <div>
+            <h1>Willibabs Webmail</h1>
+            <p>
+              This is a portfolio demo of a custom webmail I built. Mailbox login
+              is turned off, so visitors cannot open the inbox.
+            </p>
+          </div>
           <label>
             <span>Email Address</span>
-            <input
-              autoFocus
-              autoComplete="username"
-              type="email"
-              disabled={loginLoading}
-              suppressHydrationWarning
-              value={loginEmail}
-              onChange={(event) => {
-                setLoginEmail(event.target.value);
-                setLoginError("");
-              }}
-            />
+            <input disabled placeholder="Login is turned off" type="email" value="" />
           </label>
-          {!resetMode ? (
-            <label>
-              <span>Password</span>
-              <input
-                type="password"
-                autoComplete="off"
-                disabled={loginLoading}
-                suppressHydrationWarning
-                value={loginPassword}
-                onChange={(event) => {
-                  setLoginPassword(event.target.value);
-                  setLoginError("");
-                }}
-              />
-            </label>
-          ) : (
-            <>
-              <label>
-                <span>Reset Code</span>
-                <input
-                  autoComplete="one-time-code"
-                  type="password"
-                  suppressHydrationWarning
-                  value={resetCode}
-                  onChange={(event) => {
-                    setResetCode(event.target.value);
-                    setLoginError("");
-                  }}
-                />
-              </label>
-              <label>
-                <span>New Password</span>
-                <input
-                  autoComplete="new-password"
-                  minLength={12}
-                  pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}"
-                  title="Use at least 12 characters with uppercase, lowercase, number, and symbol."
-                  type="password"
-                  suppressHydrationWarning
-                  value={resetPassword}
-                  onChange={(event) => {
-                    setResetPassword(event.target.value);
-                    setLoginError("");
-                  }}
-                />
-              </label>
-              <label>
-                <span>Confirm Password</span>
-                <input
-                  autoComplete="new-password"
-                  minLength={12}
-                  type="password"
-                  suppressHydrationWarning
-                  value={resetConfirmPassword}
-                  onChange={(event) => {
-                    setResetConfirmPassword(event.target.value);
-                    setLoginError("");
-                  }}
-                />
-              </label>
-            </>
-          )}
-          {loginError ? <p className="send-error">{loginError}</p> : null}
-          <button
-            className="send-button webmail-login-button"
-            type="submit"
-            disabled={loginLoading}
-            onKeyDown={markLoginSubmitIntent}
-            onPointerDown={() => {
-              loginSubmitIntentRef.current = true;
-            }}
-          >
-            {resetMode ? "Reset Password" : loginLoading ? "Logging in..." : "Log in"}
-          </button>
-          <button
-            className="reset-password-link"
-            type="button"
-            disabled={loginLoading}
-            onClick={() => {
-              setResetMode((mode) => !mode);
-              setLoginError("");
-            }}
-          >
-            {resetMode ? "Back to Log in" : "Reset Password"}
-          </button>
-        </form>
+        </section>
       </main>
     );
   }
