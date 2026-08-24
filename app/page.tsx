@@ -890,7 +890,9 @@ export default function Home() {
   const editorRef = useRef<HTMLDivElement>(null);
   const editorSelectionRef = useRef<Range | null>(null);
   const loginSubmitIntentRef = useRef(false);
+  const loginPasswordRef = useRef<HTMLInputElement>(null);
   const refreshInFlightRef = useRef(false);
+  const [loginPasswordLocked, setLoginPasswordLocked] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -921,6 +923,7 @@ export default function Home() {
 
         setAuthenticated(false);
         setLoginEmail(data.email || mailboxAddress);
+        setLoginPassword("");
         setMailboxMode(data.mode ?? "demo");
         setPasswordConfigured(Boolean(data.passwordConfigured));
         setSetupConfigured(Boolean(data.setupConfigured));
@@ -956,6 +959,27 @@ export default function Home() {
       window.clearTimeout(sessionTimeout);
     };
   }, []);
+
+  useEffect(() => {
+    if (authenticated || sessionChecking) {
+      return;
+    }
+
+    const clearFilledPassword = () => {
+      if (document.activeElement === loginPasswordRef.current) {
+        return;
+      }
+
+      setLoginPassword("");
+      if (loginPasswordRef.current) {
+        loginPasswordRef.current.value = "";
+      }
+    };
+
+    clearFilledPassword();
+    const timers = [50, 200, 600, 1200].map((ms) => window.setTimeout(clearFilledPassword, ms));
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [authenticated, sessionChecking]);
 
   useEffect(() => {
     try {
@@ -4043,11 +4067,28 @@ export default function Home() {
           onSubmit={resetMode ? handleResetPassword : handleLogin}
         >
           <div className="webmail-logo">Webmail</div>
+          <input
+            aria-hidden="true"
+            autoComplete="username"
+            className="login-autofill-decoy"
+            name="username"
+            tabIndex={-1}
+            type="text"
+          />
+          <input
+            aria-hidden="true"
+            autoComplete="current-password"
+            className="login-autofill-decoy"
+            name="password"
+            tabIndex={-1}
+            type="password"
+          />
           <label>
             <span>Email Address</span>
             <input
               autoFocus
-              autoComplete="username"
+              autoComplete="off"
+              name="webmail-email"
               type="email"
               disabled={loginLoading}
               suppressHydrationWarning
@@ -4062,11 +4103,28 @@ export default function Home() {
             <label>
               <span>Password</span>
               <input
+                ref={loginPasswordRef}
                 type="password"
-                autoComplete="off"
+                name="webmail-access-key"
+                autoComplete="new-password"
+                data-1p-ignore="true"
+                data-lpignore="true"
                 disabled={loginLoading}
+                readOnly={loginPasswordLocked}
                 suppressHydrationWarning
                 value={loginPassword}
+                onAnimationStart={(event) => {
+                  if (event.animationName === "onAutoFillStart") {
+                    setLoginPassword("");
+                    event.currentTarget.value = "";
+                  }
+                }}
+                onFocus={() => setLoginPasswordLocked(false)}
+                onBlur={() => {
+                  if (!loginPasswordRef.current?.value) {
+                    setLoginPasswordLocked(true);
+                  }
+                }}
                 onChange={(event) => {
                   setLoginPassword(event.target.value);
                   setLoginError("");
